@@ -4,5 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.37.0"
+egui = "0.37"
+egui_plot = "0.38.0"
 num-bigint = "0.5.1"
 num-traits = "0.2.19"
+rfd = "0.17.2"
+
+# Dependencies (egui, num-bigint) are very slow unoptimised, so always optimise them.
+[profile.dev.package."*"]
+opt-level = 3

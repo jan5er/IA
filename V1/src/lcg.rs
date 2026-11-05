@@ -3,6 +3,7 @@
 // use num_bigint::BigUint;
 use num_bigint::BigUint;
 
+#[derive(Clone)]
 pub struct Lcg {
     state: u32,     // state je naš trenuten Ri
 }
@@ -31,17 +32,14 @@ impl Lcg {
             candidate += BigUint::from(self.next()); 
         }
 
+        // Obdržimo ZGORNJE bite zlepljenega števila. Spodnji biti LCG-ja z modulom 2^32 imajo zelo kratko periodo
+        // (bit 0 se samo izmenjuje, bit 1 ima periodo 4, ...), zgornji pa so statistično najboljši.
         /*
         bits_size = 4, number_of_chunks = 1
         candidate:  01011100 01111100 01010000 10011100
-        mask:       00000000 00000000 00000000 00001111
-        -----------------------------------------------
-        &mask:      00000000 00000000 00000000 00001100
+        >> (32 - 4):                                0101
         */
-
-        let mut mask = BigUint::from(1u32) << bits_size;
-        mask = mask - BigUint::from(1u32); // mask = 2^bits_size - 1
-        candidate &= mask;
+        candidate >>= number_of_chunks * 32 - bits_size;
 
         candidate |= BigUint::from(1u32) << (bits_size - 1); // Nastavimo MSb na 1 da 100% dobimo bits_size-bitno število
         candidate |= BigUint::from(1u32); // Nastavimo še LSb na 1 da dobimo liho število in potem dejansko ne rabimo še enega checka pozneje
@@ -60,12 +58,27 @@ impl Lcg {
             number += BigUint::from(self.next());
         }
 
-        let mask = (BigUint::from(1u32) << bits) - BigUint::from(1u32);
-
-        return number & mask;
+        return number >> (chunks * 32 - bits); // zgornji biti, glej generate_candidate
     }
 
+    /// RANDOM(x, y) iz navodil za intervale, ki ustrezajo 32 bitom: x + LCG() mod (y-x+1)
+    pub fn random_u32(&mut self, min: u32, max: u32) -> u32 {
+        let range = max as u64 - min as u64 + 1;
+        return (min as u64 + self.next() as u64 % range) as u32;
+    }
+
+    /// RANDOM(x, y) za poljubno velika števila: x + LCG() mod (y-x+1), kjer za velike intervale
+    /// zlepimo dovolj 32-bitnih delov (vsaj 64 bitov več kot interval), da je ostanek enakomerno porazdeljen.
     pub fn random(&mut self, min: &BigUint, max: &BigUint) -> BigUint {
-        return min + (self.generate_random_bits(max.bits() as usize) % (max - min + BigUint::from(1u32)));
+        let range = max - min + BigUint::from(1u32);
+        let chunks = (range.bits() as usize + 31) / 32 + 2;
+
+        let mut number = BigUint::from(0u32);
+        for _ in 0..chunks {
+            number <<= 32;
+            number += BigUint::from(self.next());
+        }
+
+        return min + (number % range);
     }
 }

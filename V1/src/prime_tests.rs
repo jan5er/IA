@@ -39,7 +39,31 @@ pub fn naive_prime_generator(lcg: &mut lcg::Lcg, bits_size: usize) -> BigUint {
         }
 
         prime_candidate += &two;
+
+        // Če smo z dodajanjem 2 prestopili v bits_size + 1 bitno število, začnemo znova
+        if prime_candidate.bits() as usize > bits_size {
+            prime_candidate = lcg.generate_candidate(bits_size);
+        }
     }
+}
+
+/// Naivni test praštevilskosti (iste ideje kot NAIVNA, le da testira dano število)
+pub fn naive_is_prime(number: &BigUint) -> bool {
+    let zero: BigUint = BigUint::from(0u32);
+    let two: BigUint = BigUint::from(2u32);
+
+    if number < &two { return false; }
+    if number == &two { return true; }
+    if number % &two == zero { return false; }
+
+    let mut potential_divisor = BigUint::from(3u32);
+    while &potential_divisor * &potential_divisor <= *number {
+        if number % &potential_divisor == zero {
+            return false;
+        }
+        potential_divisor += &two;
+    }
+    return true;
 }
 
 pub fn miller_rabin_test(lcg: &mut lcg::Lcg, prime_candidate: BigUint, s: usize) -> MillerRabinResult {
@@ -48,6 +72,7 @@ pub fn miller_rabin_test(lcg: &mut lcg::Lcg, prime_candidate: BigUint, s: usize)
     let two: BigUint = BigUint::from(2u32);
     let three: BigUint = BigUint::from(3u32);
 
+    if prime_candidate < two { return MillerRabinResult::CompositeNumber; } // 0 in 1 nista praštevili
     if prime_candidate <= three { return MillerRabinResult::Prime; }
     if &prime_candidate % &two == zero { return MillerRabinResult::CompositeNumber; } 
 
@@ -90,7 +115,12 @@ pub fn miller_rabin_prime_generator(lcg: &mut lcg::Lcg, bits_size: usize, s: usi
         match result {
             MillerRabinResult::Prime => return prime_candidate,
             MillerRabinResult::ProbablyPrime => return prime_candidate,
-            MillerRabinResult::CompositeNumber => prime_candidate += &two,
+            MillerRabinResult::CompositeNumber => {
+                prime_candidate += &two;
+                if prime_candidate.bits() as usize > bits_size {
+                    prime_candidate = lcg.generate_candidate(bits_size);
+                }
+            }
         }
     }
 }

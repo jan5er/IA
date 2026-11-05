@@ -1,97 +1,84 @@
-use std::io;
-use num_bigint::BigUint;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::bits::test_bit_writer;
-
-mod lcg;    
-mod prime_tests;
-mod math;
-mod rsa;
+mod bench;
 mod bits;
+mod cli;
+mod gui;
+mod lcg;
+mod math;
+mod prime_tests;
+mod rsa;
 
-fn get_time_seed() -> u32 {
-    return SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u32;
+fn main() -> eframe::Result {
+    // `cargo run -- --cli` zažene prvotni konzolni meni, sicer se odpre grafični vmesnik
+    if std::env::args().any(|arg| arg == "--cli") {
+        cli::run(0);
+        return Ok(());
+    }
+
+    gui::run()
 }
 
-fn menu() {
-    println!("--------[ MENU ]--------");
-    println!("[1] Generate random number");
-    println!("[2] Generate prime number");
-    println!("[3] Generate prime number (Miller-Rabin)");
-    println!("[4] Generate RSA keys");
-    println!("[5] Encrypt a file");
-    println!("[6] Decrypt a file");
-    println!("------------------------");
-}
+#[cfg(test)]
+mod tests {
+    use crate::lcg::Lcg;
+    use crate::prime_tests::{miller_rabin_test, naive_is_prime, MillerRabinResult};
+    use crate::rsa::{self, PrimeMethod};
+    use num_bigint::BigUint;
 
-fn main() {
-    // let seed: u32 = get_time_seed();
-    let seed: u32 = 0;
-    let mut lcg = lcg::Lcg::new(seed);
+    #[test]
+    fn naive_and_miller_rabin_agree_on_small_numbers() {
+        let mut lcg = Lcg::new(1);
+        for n in 0u32..5000 {
+            let big = BigUint::from(n);
+            let naive = naive_is_prime(&big);
+            let mr = !matches!(miller_rabin_test(&mut lcg, big, 10), MillerRabinResult::CompositeNumber);
+            assert_eq!(naive, mr, "disagreement for {}", n);
+        }
+    }
 
-    loop {
-        let mut choice = String::new();
-        menu();
-
-        io::stdin().read_line(&mut choice).expect("Failed to read line");
-
-        let choice: u8 = choice.trim().parse().expect("Please type a number!");
-
-        match choice {
-            1 => {
-                println!("Generating random number...");
-                let random_number = lcg.generate_candidate(50);
-                let random: BigUint = lcg.random(&BigUint::from(10u32), &BigUint::from(100u32));
-                println!("Random number: {}", random_number);
-                println!("Random number in binary: {:b}", random_number);
-                println!("Random random: {}", random);
-            }
-            2 => {
-                println!("Generating prime number...");
-                let prime = prime_tests::naive_prime_generator(&mut lcg, 50);
-                println!("Prime number: {}", prime);
-                println!("Prime number in binary: {:b}", prime);
-            }
-            3 => {
-                println!("Generating prime number (Miller-Rabin)...");
-                let prime = prime_tests::miller_rabin_prime_generator(&mut lcg, 1024, 10);
-                println!("Prime number: {}", prime);
-                println!("Prime number in binary: {:b}", prime);
-            }
-            4 => {
-                println!("Generating RSA keys...");
-                let rsa_keys = rsa::key_generator(&mut lcg);
-                println!("RSA keys generated:");
-                println!("n: {}", rsa_keys.n);
-                println!("e: {}", rsa_keys.e);
-                println!("d: {}", rsa_keys.d);
-                println!("Public Key: (e, n) = ({}, {})", rsa_keys.e, rsa_keys.n);
-                println!("Private Key: (d, n) = ({}, {})", rsa_keys.d, rsa_keys.n);
-                rsa::save_rsa_key_to_file(&rsa_keys, rsa::RsaKeyType::PublicKey);
-                rsa::save_rsa_key_to_file(&rsa_keys, rsa::RsaKeyType::PrivateKey);
-            }
-            5 => {
-                println!("Encrypting a file...");
-                let mut file_path = String::new();
-                println!("Enter the path of the file to encrypt:");
-                io::stdin().read_line(&mut file_path).expect("Failed to read line");
-                let file_path = file_path.trim();
-                rsa::encrypt_file(file_path, "encrypted.bin", "pubkey.txt");
-            }
-            6 => {
-                println!("Decrypting a file...");
-                let mut file_path = String::new();
-                println!("Enter the path of the file to decrypt:");
-                io::stdin().read_line(&mut file_path).expect("Failed to read line");
-                let file_path = file_path.trim();
-                rsa::decrypt_file(file_path, "decrypted", "privkey.txt");
-            }
-            _ => {
-                println!("Invalid choice. Please try again.");
+    #[test]
+    fn generators_return_primes_with_exact_bit_length() {
+        let mut lcg = Lcg::new(7);
+        for bits in 2..=32 {
+            for method in [PrimeMethod::Naive, PrimeMethod::MillerRabin] {
+                let p = rsa::generate_prime(&mut lcg, bits, method, 10);
+                assert_eq!(p.bits() as usize, bits, "{:?} {} bits gave {}", method, bits, p);
+                assert!(naive_is_prime(&p), "{:?} {} bits gave composite {}", method, bits, p);
             }
         }
     }
 
+    #[test]
+    fn rsa_round_trip_for_all_key_sizes() {
+        let mut lcg = Lcg::new(3);
+        let data: Vec<u8> = (0..2000u32).map(|i| (i * 31 % 251) as u8).collect();
+        for bits in [3usize, 4, 5, 8, 12, 15, 32, 64, 256] {
+            for method in [PrimeMethod::Naive, PrimeMethod::MillerRabin] {
+                if method == PrimeMethod::Naive && bits > 32 { continue; }
+                let keys = rsa::key_generator(&mut lcg, bits, method, 10).unwrap_or_else(|e| panic!("{:?} {} bits: {}", method, bits, e));
+                let enc = rsa::encrypt_bytes(&data, "bin", &keys.e, &keys.n);
+                let (dec, ext) = rsa::decrypt_bytes(&enc, &keys.d, &keys.n).unwrap();
+                assert_eq!(dec, data, "round trip failed for {:?} {} bits", method, bits);
+                assert_eq!(ext, "bin");
+            }
+        }
+    }
 
-}   
+    #[test]
+    fn decrypt_rejects_garbage() {
+        let n = BigUint::from(35u32);
+        assert!(rsa::decrypt_bytes(&[], &n, &n).is_err());
+        assert!(rsa::decrypt_bytes(&[200, 1, 2], &n, &n).is_err());
+        assert!(rsa::decrypt_bytes(&[0, 0, 0, 0, 0, 0, 0, 255, 255, 1], &n, &n).is_err());
+    }
+
+    #[test]
+    fn random_stays_inside_interval() {
+        let mut lcg = Lcg::new(0);
+        for _ in 0..10_000 {
+            let v = lcg.random(&BigUint::from(10u32), &BigUint::from(100u32));
+            assert!(v >= BigUint::from(10u32) && v <= BigUint::from(100u32));
+            let w = lcg.random_u32(5, 7);
+            assert!((5..=7).contains(&w));
+        }
+    }
+}
