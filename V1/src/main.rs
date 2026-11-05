@@ -2,8 +2,6 @@ use std::io;
 use num_bigint::BigUint;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::bits::test_bit_writer;
-
 mod lcg;    
 mod prime_tests;
 mod math;
