@@ -2,10 +2,13 @@ use std::io;
 use num_bigint::BigUint;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::bits::test_bit_writer;
+
 mod lcg;    
 mod prime_tests;
 mod math;
 mod rsa;
+mod bits;
 
 fn get_time_seed() -> u32 {
     return SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u32;
@@ -17,7 +20,8 @@ fn menu() {
     println!("[2] Generate prime number");
     println!("[3] Generate prime number (Miller-Rabin)");
     println!("[4] Generate RSA keys");
-    println!("[5] Exit");
+    println!("[5] Encrypt a file");
+    println!("[6] Decrypt a file");
     println!("------------------------");
 }
 
@@ -62,12 +66,26 @@ fn main() {
                 println!("n: {}", rsa_keys.n);
                 println!("e: {}", rsa_keys.e);
                 println!("d: {}", rsa_keys.d);
-                println!("Public Key: (n, e) = ({}, {})", rsa_keys.n, rsa_keys.e);
-                println!("Private Key: (n, d) = ({}, {})", rsa_keys.n, rsa_keys.d);
+                println!("Public Key: (e, n) = ({}, {})", rsa_keys.e, rsa_keys.n);
+                println!("Private Key: (d, n) = ({}, {})", rsa_keys.d, rsa_keys.n);
+                rsa::save_rsa_key_to_file(&rsa_keys, rsa::RsaKeyType::PublicKey);
+                rsa::save_rsa_key_to_file(&rsa_keys, rsa::RsaKeyType::PrivateKey);
             }
             5 => {
-                println!("Exiting...");
-                break;
+                println!("Encrypting a file...");
+                let mut file_path = String::new();
+                println!("Enter the path of the file to encrypt:");
+                io::stdin().read_line(&mut file_path).expect("Failed to read line");
+                let file_path = file_path.trim();
+                rsa::encrypt_file(file_path, "encrypted.bin", "pubkey.txt");
+            }
+            6 => {
+                println!("Decrypting a file...");
+                let mut file_path = String::new();
+                println!("Enter the path of the file to decrypt:");
+                io::stdin().read_line(&mut file_path).expect("Failed to read line");
+                let file_path = file_path.trim();
+                rsa::decrypt_file(file_path, "decrypted.txt", "privkey.txt");
             }
             _ => {
                 println!("Invalid choice. Please try again.");
