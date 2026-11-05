@@ -85,7 +85,7 @@ fn main() {
                 println!("Enter the path of the file to decrypt:");
                 io::stdin().read_line(&mut file_path).expect("Failed to read line");
                 let file_path = file_path.trim();
-                rsa::decrypt_file(file_path, "decrypted.txt", "privkey.txt");
+                rsa::decrypt_file(file_path, "decrypted", "privkey.txt");
             }
             _ => {
                 println!("Invalid choice. Please try again.");

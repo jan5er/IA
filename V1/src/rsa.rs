@@ -79,8 +79,18 @@ pub fn encrypt_file(input_path: &str, output_path: &str, rsa_keys_path: &str) {
         bit_writer.push_bits(&c, write_bits_size);
     }
 
-    let mut out = (input_data.len() as u64).to_be_bytes().to_vec(); // header: 8B za velikost originalnega input file-a
+    let ext = std::path::Path::new(input_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let ext_bytes = ext.as_bytes();
+
+    let mut out = Vec::new();
+    out.push(ext_bytes.len() as u8);                              // 1B za velikost extension tipa
+    out.extend_from_slice(ext_bytes);                              // Extension tip
+    out.extend_from_slice(&(input_data.len() as u64).to_be_bytes()); // 8B za velikost originala
     out.extend(bit_writer.finish());
+
     std::fs::write(output_path, out).expect("Unable to write output file");
 }
 
@@ -91,10 +101,16 @@ pub fn decrypt_file(input_path: &str, output_path: &str, rsa_keys_path: &str) {
     let encrypted_bits_size = n.bits() as usize;   
     let write_size = (n.bits() - 1) as usize;   
 
-    let original_size = u64::from_be_bytes(input_data[0..8].try_into().unwrap()) as usize; // preberemo prvih 8B za velikost originalnega input file-a
-    let total_chunks = (original_size * 8 + write_size - 1) / write_size; // ceil(total_bits / write_size) -> koliko chunkov moramo prebrati da dobimo originalno velikost
+    // Header: [1B ext length][ext][8B original size]
+    let ext_len = input_data[0] as usize;
+    let ext = String::from_utf8_lossy(&input_data[1..1 + ext_len]).to_string();
+    let size_start = 1 + ext_len;
+    let original_size = u64::from_be_bytes(input_data[size_start..size_start + 8].try_into().unwrap()) as usize;
+    let data_start = size_start + 8;
 
-    let mut bit_reader = crate::bits::BitReader::new(&input_data[8..]); // Preskočimo prvih 8B
+    let total_chunks = (original_size * 8 + write_size - 1) / write_size; 
+
+    let mut bit_reader = crate::bits::BitReader::new(&input_data[data_start..]); // Preskočimo cel header
     let mut bit_writer = crate::bits::BitWriter::new(); 
 
     for _ in 0..total_chunks {
@@ -102,6 +118,12 @@ pub fn decrypt_file(input_path: &str, output_path: &str, rsa_keys_path: &str) {
         let m = math::modular_exponetiation(&c, &d, &n);
         bit_writer.push_bits(&m, write_size);
     }
+
+    let output_path = if ext.is_empty() {
+        output_path.to_string()
+    } else {
+        format!("{}.{}", output_path, ext)
+    };
 
     let mut out = bit_writer.finish();
     out.truncate(original_size); // Odstranimo morebitne dodatne bite, ki so nastali zaradi padding-a
